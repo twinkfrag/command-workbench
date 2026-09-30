@@ -1,0 +1,57 @@
+{
+  "scopeName": "source.argslist",
+  "patterns": [
+    { "include": "#strings" },
+    { "include": "#comments" },
+    { "include": "#directives" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.argslist",
+          "match": "^\\s*(#).*$",
+          "captures": {
+            "1": { "name": "punctuation.definition.comment.argslist" }
+          }
+        }
+      ]
+    },
+    "directives": {
+      "patterns": [
+        {
+          "name": "meta.directive.exec.argslist",
+          "match": "^\\s*(@exec)\\b[ \\t]+(\"([^\"]*)\"|([^\\s]+))",
+          "captures": {
+            "1": { "name": "keyword.control.directive.argslist" },
+            "2": { "name": "entity.name.function.command-profile.argslist" },
+            "3": { "name": "string.quoted.double.argslist" },
+            "4": { "name": "entity.name.function.command-profile.argslist" }
+          }
+        },
+        {
+          "name": "meta.directive.cwd.argslist",
+          "match": "^\\s*(@cwd)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.directive.argslist" }
+          }
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.argslist",
+          "begin": "\"",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.argslist" }
+          },
+          "end": "\"",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.argslist" }
+          }
+        }
+      ]
+    }
+  }
+}

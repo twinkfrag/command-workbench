@@ -27,6 +27,13 @@
         "configuration": "./language-configuration.json"
       }
     ],
+    "grammars": [
+      {
+        "language": "argslist",
+        "scopeName": "source.argslist",
+        "path": "./syntaxes/argslist.tmLanguage.json"
+      }
+    ],
     "commands": [
       {
         "command": "commandWorkbench.submit",

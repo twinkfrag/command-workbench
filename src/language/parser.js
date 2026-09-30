@@ -58,6 +58,39 @@ function resolveCwd(value, currentCwd, location) {
   return path.resolve(currentCwd, value);
 }
 
+function getCwdBeforeLine(source, targetLine, defaultCwd) {
+  let currentCwd = defaultCwd ? path.resolve(defaultCwd) : undefined;
+  let quoted = false;
+
+  for (const line of getPhysicalLines(source)) {
+    if (line.line >= targetLine) {
+      break;
+    }
+
+    const isComment = !quoted && /^\s*#/.test(line.text);
+    const isDirective = !quoted && /^\s*@/.test(line.text);
+    if (isComment) {
+      continue;
+    }
+    if (isDirective) {
+      const leadingWhitespace = line.text.match(/^\s*/)[0].length;
+      try {
+        const tokens = tokenizeArguments(line.text.slice(leadingWhitespace));
+        if (tokens[0]?.value === "@cwd" && tokens.length === 2) {
+          currentCwd = resolveCwd(tokens[1].value, currentCwd, tokens[1]);
+        }
+      } catch {
+        currentCwd = undefined;
+      }
+      continue;
+    }
+
+    quoted = updateQuoteState(line.text + line.newline, quoted);
+  }
+
+  return currentCwd;
+}
+
 function parseArgsList(source, { commands = {}, defaultCwd } = {}) {
   if (typeof source !== "string") {
     throw new TypeError("source must be a string");
@@ -183,4 +216,4 @@ function parseArgsList(source, { commands = {}, defaultCwd } = {}) {
   });
 }
 
-module.exports = { parseArgsList };
+module.exports = { getCwdBeforeLine, parseArgsList };

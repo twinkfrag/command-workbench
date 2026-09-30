@@ -9,9 +9,12 @@
 - `commandWorkbench.commands` の実行profile検証。executable shorthandと固定 `args` を持つprofileに対応
 - `Ctrl+Enter` による未保存bufferのJob化と、Task API `ProcessExecution` を使った複数Stepの逐次実行
 - FIFO Job Queueと `commandWorkbench.maxParallelJobs` によるJob単位の並列実行
-- tokenizer、parser、profile検証、Job snapshot、Queue、実行制御のunit test
+- `DocumentDropEditProvider` によるfile path挿入、Command Profile / path completion、comment・directive・quoted stringのsyntax highlighting
+- tokenizer、parser、profile検証、Job snapshot、Queue、実行制御、Editor providerのunit test
 
-Editor補完、D&D、Queue UIは未実装です。
+Queue UIは未実装です。
+
+ファイルD&DにはVS Code設定 `editor.dropIntoEditor.enabled` が必要です。OSからEditorへdropする場合はShiftを押しながら操作する必要があることがあります。D&DはCommand optionを追加せず、quoted full pathだけを挿入します。
 
 ## 形式の例
 
