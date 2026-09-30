@@ -1,0 +1,72 @@
+{
+  "name": "command-workbench",
+  "displayName": "Command Workbench",
+  "description": "CLI引数列を編集し、Jobとして実行キューへ投入するVS Code拡張です。",
+  "version": "0.1.0",
+  "publisher": "command-workbench",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onLanguage:argslist"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "argslist",
+        "aliases": [
+          "Argslist"
+        ],
+        "extensions": [
+          ".argslist"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "configuration": {
+      "title": "Command Workbench",
+      "properties": {
+        "commandWorkbench.commands": {
+          "type": "object",
+          "default": {},
+          "description": "@exec directive で利用するCommand Profileです。",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "executable": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "args": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": []
+                  }
+                },
+                "required": [
+                  "executable"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node test/run.js"
+  }
+}
