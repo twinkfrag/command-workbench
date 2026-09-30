@@ -27,6 +27,31 @@
         "configuration": "./language-configuration.json"
       }
     ],
+    "commands": [
+      {
+        "command": "commandWorkbench.submit",
+        "title": "Command Workbench: Submit Argslist Job"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "commandWorkbench.submit",
+        "key": "ctrl+enter",
+        "when": "editorLangId == argslist"
+      }
+    ],
+    "taskDefinitions": [
+      {
+        "type": "commandWorkbench",
+        "required": ["jobId"],
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "description": "Job snapshotの識別子"
+          }
+        }
+      }
+    ],
     "configuration": {
       "title": "Command Workbench",
       "properties": {
@@ -62,6 +87,11 @@
               }
             ]
           }
+        },
+        "commandWorkbench.defaultCwd": {
+          "type": "string",
+          "default": "",
+          "description": "Untitled documentでworkspace folderがない場合に使うdefault cwdです。"
         }
       }
     }
