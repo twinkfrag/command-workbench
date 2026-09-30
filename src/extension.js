@@ -1,6 +1,7 @@
 const { getDefaultCwd, registerSubmitCommand } = require("./commands/submitCommand");
 const { registerEditorProviders } = require("./editor/editorProviders");
 const { JobScheduler } = require("./queue/scheduler");
+const { registerQueueUI } = require("./view/queueTree");
 const { runJob } = require("./execution/processRunner");
 
 function activate(context) {
@@ -13,6 +14,7 @@ function activate(context) {
 
   context.subscriptions.push(registerSubmitCommand(vscode, scheduler));
   context.subscriptions.push(...registerEditorProviders(vscode, getDefaultCwd));
+  context.subscriptions.push(...registerQueueUI(vscode, scheduler));
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
     if (!event.affectsConfiguration("commandWorkbench.maxParallelJobs")) {
       return;

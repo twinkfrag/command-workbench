@@ -12,7 +12,8 @@
   ],
   "main": "./src/extension.js",
   "activationEvents": [
-    "onLanguage:argslist"
+    "onLanguage:argslist",
+    "onView:commandWorkbench.queue"
   ],
   "contributes": {
     "languages": [
@@ -38,8 +39,56 @@
       {
         "command": "commandWorkbench.submit",
         "title": "Command Workbench: Submit Argslist Job"
+      },
+      {
+        "command": "commandWorkbench.cancelWaitingJob",
+        "title": "Command Workbench: Cancel Waiting Job"
+      },
+      {
+        "command": "commandWorkbench.terminateRunningJob",
+        "title": "Command Workbench: Terminate Running Job"
+      },
+      {
+        "command": "commandWorkbench.rerunJob",
+        "title": "Command Workbench: Rerun Job"
+      },
+      {
+        "command": "commandWorkbench.showJobSnapshot",
+        "title": "Command Workbench: Show Job Snapshot"
       }
     ],
+    "views": {
+      "explorer": [
+        {
+          "id": "commandWorkbench.queue",
+          "name": "Command Queue"
+        }
+      ]
+    },
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "commandWorkbench.cancelWaitingJob",
+          "when": "view == commandWorkbench.queue && viewItem == commandWorkbench.job.waiting",
+          "group": "1_control"
+        },
+        {
+          "command": "commandWorkbench.terminateRunningJob",
+          "when": "view == commandWorkbench.queue && viewItem == commandWorkbench.job.running",
+          "group": "1_control"
+        },
+        {
+          "command": "commandWorkbench.rerunJob",
+          "when": "view == commandWorkbench.queue",
+          "group": "2_run"
+        },
+        {
+          "command": "commandWorkbench.showJobSnapshot",
+          "when": "view == commandWorkbench.queue",
+          "group": "3_snapshot"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "commandWorkbench.submit",

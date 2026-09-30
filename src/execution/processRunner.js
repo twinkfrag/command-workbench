@@ -26,12 +26,14 @@ function makeTask(vscode, job, step, stepIndex) {
   return task;
 }
 
-function executeProcessTask(vscode, task) {
+function executeProcessTask(vscode, task, { signal } = {}) {
   return new Promise((resolve, reject) => {
     let processEndEvent;
     let executeTaskResolved = false;
     let settled = false;
     let subscription;
+    let taskExecution;
+    let terminationSent = false;
 
     const finish = (exitCode) => {
       if (settled) {
@@ -39,7 +41,32 @@ function executeProcessTask(vscode, task) {
       }
       settled = true;
       subscription?.dispose();
+      signal?.removeEventListener("abort", onAbort);
       resolve(exitCode);
+    };
+
+    const onAbort = () => {
+      const activeExecution = taskExecution
+        ?? vscode.tasks.taskExecutions?.find((execution) => execution.task.name === task.name);
+      if (!activeExecution || terminationSent) {
+        return;
+      }
+      terminationSent = true;
+      try {
+        activeExecution.terminate();
+      } catch {
+        // The task may have ended while the cancellation event was delivered.
+      }
+    };
+
+    const fail = (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      subscription?.dispose();
+      signal?.removeEventListener("abort", onAbort);
+      reject(error);
     };
 
     subscription = vscode.tasks.onDidEndTaskProcess((event) => {
@@ -52,37 +79,53 @@ function executeProcessTask(vscode, task) {
       }
       finish(event.exitCode);
     });
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+    }
 
     try {
-      Promise.resolve(vscode.tasks.executeTask(task)).then(() => {
+      Promise.resolve(vscode.tasks.executeTask(task)).then((execution) => {
+        taskExecution = execution;
         executeTaskResolved = true;
+        if (signal?.aborted && !processEndEvent) {
+          onAbort();
+        }
         if (processEndEvent) {
           finish(processEndEvent.exitCode);
         }
       }, (error) => {
-        if (!settled) {
-          settled = true;
-          subscription?.dispose();
-          reject(error);
-        }
+        fail(error);
       });
     } catch (error) {
-      settled = true;
-      subscription?.dispose();
-      reject(error);
+      fail(error);
     }
   });
 }
 
-async function runStep(vscode, job, stepIndex) {
+async function runStep(vscode, job, stepIndex, { signal } = {}) {
   const task = makeTask(vscode, job, job.steps[stepIndex], stepIndex);
-  return executeProcessTask(vscode, task);
+  return executeProcessTask(vscode, task, { signal });
 }
 
-async function runJob(vscode, job, { onStepStart } = {}) {
+async function runJob(vscode, job, { onStepStart, signal } = {}) {
   for (let index = 0; index < job.steps.length; index += 1) {
+    if (signal?.aborted) {
+      return Object.freeze({ status: "cancelled" });
+    }
     onStepStart?.(index);
-    const exitCode = await runStep(vscode, job, index);
+    let exitCode;
+    try {
+      exitCode = await runStep(vscode, job, index, { signal });
+    } catch (error) {
+      if (signal?.aborted) {
+        return Object.freeze({ status: "cancelled" });
+      }
+      throw error;
+    }
+    if (signal?.aborted) {
+      return Object.freeze({ status: "cancelled" });
+    }
     if (exitCode !== 0) {
       return Object.freeze({
         status: "failed",

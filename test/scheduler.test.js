@@ -162,3 +162,103 @@ test("並列度とJob IDの入力を検証する", () => {
   scheduler.submit(makeJob("job-1"));
   assert.throws(() => scheduler.submit(makeJob("job-1")), /既にQueue/);
 });
+
+test("Waiting JobをCancelし、後続のWaiting Jobを開始する", async () => {
+  const pending = [];
+  const starts = [];
+  const scheduler = new JobScheduler({
+    maxParallelJobs: 1,
+    executeJob: (job) => {
+      starts.push(job.id);
+      const run = deferred();
+      pending.push(run);
+      return run.promise;
+    },
+  });
+  const first = scheduler.submit(makeJob("job-1"));
+  const cancelled = scheduler.submit(makeJob("job-2"));
+  const third = scheduler.submit(makeJob("job-3"));
+  await nextTurn();
+
+  assert.equal(scheduler.cancelWaiting("job-2"), true);
+  assert.equal((await cancelled.completion).status, "Cancelled");
+  pending[0].resolve({ status: "completed" });
+  assert.equal((await first.completion).status, "Completed");
+  await nextTurn();
+
+  assert.deepEqual(starts, ["job-1", "job-3"]);
+  pending[1].resolve({ status: "completed" });
+  assert.equal((await third.completion).status, "Completed");
+  assert.equal(scheduler.cancelWaiting("job-2"), false);
+});
+
+test("Running JobのTerminateでsignalをabortし、完了後にCancelledにする", async () => {
+  const pending = [];
+  const scheduler = new JobScheduler({
+    executeJob: (job, callbacks) => {
+      const run = deferred();
+      pending.push({ job, ...run, signal: callbacks.signal });
+      return run.promise;
+    },
+  });
+  const submission = scheduler.submit(makeJob("job-1"));
+  await nextTurn();
+
+  assert.equal(scheduler.terminateRunning("job-1"), true);
+  assert.equal(pending[0].signal.aborted, true);
+  assert.equal(scheduler.getState("job-1").terminationRequested, true);
+  assert.equal(scheduler.terminateRunning("job-1"), false);
+  pending[0].resolve({ status: "cancelled" });
+
+  assert.equal((await submission.completion).status, "Cancelled");
+  assert.equal(scheduler.getState("job-1").terminationRequested, true);
+});
+
+test("Rerunは新しいQueue IDで元のimmutableな実行snapshotを使う", async () => {
+  const executed = [];
+  const snapshot = Object.freeze({
+    id: "job-original",
+    submittedAt: 123,
+    sourceText: "@exec tool\n--fixed input.dat",
+    steps: Object.freeze([Object.freeze({
+      executablePath: "C:\\tools\\tool.exe",
+      cwd: "C:\\work",
+      argv: Object.freeze(["--fixed", "input.dat"]),
+      env: Object.freeze({ PATH: "C:\\tools" }),
+    })]),
+  });
+  const scheduler = new JobScheduler({
+    executeJob: async (job) => {
+      executed.push(job);
+      return { status: "completed" };
+    },
+    createRerunId: () => "job-rerun",
+  });
+  const original = scheduler.submit(snapshot);
+  await original.completion;
+
+  const rerun = scheduler.rerun("job-original");
+  await rerun.completion;
+
+  assert.equal(rerun.jobId, "job-rerun");
+  assert.equal(executed[1].sourceText, snapshot.sourceText);
+  assert.equal(executed[1].submittedAt, snapshot.submittedAt);
+  assert.strictEqual(executed[1].steps, snapshot.steps);
+  assert.equal(executed[1].steps[0].argv.join(" "), "--fixed input.dat");
+  assert.equal(scheduler.getState("job-original").status, "Completed");
+});
+
+test("実行開始エラーもTree View向けに失敗Step番号を保持する", async () => {
+  const scheduler = new JobScheduler({
+    executeJob: (job, callbacks) => {
+      callbacks.onStepStart(1);
+      throw new Error("process could not start");
+    },
+  });
+  const submission = scheduler.submit(makeJob("job-start-error", 2));
+  const state = await submission.completion;
+
+  assert.equal(state.status, "Failed");
+  assert.equal(state.failedStep, 2);
+  assert.match(state.error.message, /could not start/);
+});

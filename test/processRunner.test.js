@@ -48,6 +48,64 @@ function createFakeVscode(exitCodes) {
   };
 }
 
+test("Terminate aborts the active Task and marks the Job as cancelled", async () => {
+  const listeners = new Set();
+  let terminateCount = 0;
+  const tasks = [];
+  class ProcessExecution {
+    constructor(process, args, options) {
+      Object.assign(this, { process, args, options });
+    }
+  }
+  class Task {
+    constructor(definition, scope, name, source, execution) {
+      Object.assign(this, { definition, scope, name, source, execution });
+      tasks.push(this);
+    }
+  }
+  const vscode = {
+    TaskScope: { Workspace: 2 },
+    TaskRevealKind: { Always: 1 },
+    TaskPanelKind: { Dedicated: 2 },
+    ProcessExecution,
+    Task,
+    tasks: {
+      onDidEndTaskProcess(listener) {
+        listeners.add(listener);
+        return { dispose: () => listeners.delete(listener) };
+      },
+      executeTask(task) {
+        const execution = {
+          task,
+          terminate() {
+            terminateCount += 1;
+            queueMicrotask(() => {
+              for (const listener of [...listeners]) {
+                listener({ execution, exitCode: undefined });
+              }
+            });
+          },
+        };
+        return Promise.resolve(execution);
+      },
+    },
+  };
+  const controller = new AbortController();
+  const resultPromise = runJob(vscode, {
+    id: "job-cancel",
+    steps: [
+      { executablePath: "tool.exe", argv: [], cwd: "C:\\work" },
+      { executablePath: "next.exe", argv: [], cwd: "C:\\work" },
+    ],
+  }, { signal: controller.signal });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort();
+
+  assert.deepEqual(await resultPromise, { status: "cancelled" });
+  assert.equal(terminateCount, 1);
+  assert.equal(tasks.length, 1);
+});
+
 test("ProcessExecutionへexecutable、argv、cwdを渡し、Stepを逐次実行する", async () => {
   const vscode = createFakeVscode([0, 0]);
   const job = {

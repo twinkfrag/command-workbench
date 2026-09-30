@@ -1,5 +1,7 @@
+const { randomUUID } = require("node:crypto");
+
 class JobScheduler {
-  constructor({ maxParallelJobs = 1, executeJob, onStateChange = () => {} } = {}) {
+  constructor({ maxParallelJobs = 1, executeJob, onStateChange = () => {}, createRerunId = randomUUID } = {}) {
     this.validateLimit(maxParallelJobs);
     if (typeof executeJob !== "function") {
       throw new TypeError("executeJob must be a function");
@@ -7,9 +9,11 @@ class JobScheduler {
     this.maxParallelJobs = maxParallelJobs;
     this.executeJob = executeJob;
     this.onStateChange = onStateChange;
+    this.createRerunId = createRerunId;
     this.waiting = [];
     this.running = new Set();
     this.jobs = new Map();
+    this.listeners = new Set();
   }
 
   validateLimit(value) {
@@ -37,6 +41,8 @@ class JobScheduler {
       result: undefined,
       error: undefined,
       resolveCompletion,
+      abortController: undefined,
+      terminationRequested: false,
     };
     this.jobs.set(job.id, record);
     this.waiting.push(job.id);
@@ -56,6 +62,49 @@ class JobScheduler {
     this.pump();
   }
 
+  subscribe(listener) {
+    if (typeof listener !== "function") {
+      throw new TypeError("listener must be a function");
+    }
+    this.listeners.add(listener);
+    return Object.freeze({ dispose: () => this.listeners.delete(listener) });
+  }
+
+  cancelWaiting(jobId) {
+    const record = this.jobs.get(jobId);
+    if (!record || record.status !== "Waiting") {
+      return false;
+    }
+    record.status = "Cancelled";
+    this.publish(record);
+    record.resolveCompletion(this.getState(jobId));
+    this.pump();
+    return true;
+  }
+
+  terminateRunning(jobId) {
+    const record = this.jobs.get(jobId);
+    if (!record || record.status !== "Running" || record.terminationRequested) {
+      return false;
+    }
+    record.terminationRequested = true;
+    record.abortController?.abort();
+    this.publish(record);
+    return true;
+  }
+
+  rerun(jobId) {
+    const record = this.jobs.get(jobId);
+    if (!record) {
+      throw new Error(`Job ID "${jobId}" がQueueにありません。`);
+    }
+    const rerunJob = Object.freeze({
+      ...record.job,
+      id: this.createRerunId(),
+    });
+    return this.submit(rerunJob);
+  }
+
   getState(jobId) {
     const record = this.jobs.get(jobId);
     if (!record) {
@@ -69,10 +118,19 @@ class JobScheduler {
       sourceText: record.job.sourceText,
       steps: record.job.steps,
       ...(record.currentStep === undefined ? {} : { currentStep: record.currentStep }),
-      ...(record.result?.failedStep === undefined ? {} : { failedStep: record.result.failedStep + 1 }),
+      ...(record.result?.failedStep !== undefined
+        ? { failedStep: record.result.failedStep + 1 }
+        : record.status === "Failed" && record.currentStep !== undefined
+          ? { failedStep: record.currentStep }
+          : {}),
       ...(record.result?.exitCode === undefined ? {} : { exitCode: record.result.exitCode }),
+      ...(record.terminationRequested ? { terminationRequested: true } : {}),
       ...(record.error ? { error: record.error } : {}),
     });
+  }
+
+  getSnapshot(jobId) {
+    return this.jobs.get(jobId)?.job;
   }
 
   getStates() {
@@ -80,10 +138,18 @@ class JobScheduler {
   }
 
   publish(record) {
+    const state = this.getState(record.job.id);
     try {
-      this.onStateChange(this.getState(record.job.id));
+      this.onStateChange(state);
     } catch (error) {
       console.error("Command Workbench state listener failed.", error);
+    }
+    for (const listener of this.listeners) {
+      try {
+        listener(state);
+      } catch (error) {
+        console.error("Command Workbench state listener failed.", error);
+      }
     }
   }
 
@@ -97,11 +163,13 @@ class JobScheduler {
 
       record.status = "Running";
       record.currentStep = undefined;
+      record.abortController = new AbortController();
       this.running.add(jobId);
       this.publish(record);
 
       Promise.resolve()
         .then(() => this.executeJob(record.job, {
+          signal: record.abortController.signal,
           onStepStart: (index) => {
             if (record.status !== "Running") {
               return;
@@ -112,11 +180,19 @@ class JobScheduler {
         }))
         .then((result) => {
           record.result = result;
-          record.status = result?.status === "completed" ? "Completed" : "Failed";
+          record.status = result?.status === "completed"
+            ? "Completed"
+            : result?.status === "cancelled" || record.terminationRequested
+              ? "Cancelled"
+              : "Failed";
           this.finish(record);
         }, (error) => {
-          record.error = error;
-          record.status = "Failed";
+          if (record.terminationRequested) {
+            record.status = "Cancelled";
+          } else {
+            record.error = error;
+            record.status = "Failed";
+          }
           this.finish(record);
         });
     }

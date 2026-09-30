@@ -7,3 +7,4 @@ require("./processRunner.test");
 require("./submitCommand.test");
 require("./scheduler.test");
 require("./editorProviders.test");
+require("./queueTree.test");
