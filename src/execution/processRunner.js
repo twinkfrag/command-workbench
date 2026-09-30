@@ -79,8 +79,9 @@ async function runStep(vscode, job, stepIndex) {
   return executeProcessTask(vscode, task);
 }
 
-async function runJob(vscode, job) {
+async function runJob(vscode, job, { onStepStart } = {}) {
   for (let index = 0; index < job.steps.length; index += 1) {
+    onStepStart?.(index);
     const exitCode = await runStep(vscode, job, index);
     if (exitCode !== 0) {
       return Object.freeze({

@@ -1,7 +1,6 @@
 const path = require("node:path");
 const { createJobSnapshot } = require("../queue/job");
 const { parseArgsList } = require("../language/parser");
-const { runJob } = require("../execution/processRunner");
 
 function getDefaultCwd(vscode, document) {
   if (document.uri.scheme === "file") {
@@ -29,7 +28,7 @@ function formatError(error) {
   return `${error.message}${location}`;
 }
 
-async function submitArgsList(vscode) {
+async function submitArgsList(vscode, scheduler) {
   const editor = vscode.window.activeTextEditor;
   if (!editor || editor.document.languageId !== "argslist") {
     await vscode.window.showWarningMessage(".argslist documentをactive editorで開いてください。");
@@ -45,21 +44,32 @@ async function submitArgsList(vscode) {
       .get("commands", {});
     const definition = parseArgsList(sourceText, { commands, defaultCwd });
     const job = createJobSnapshot(sourceText, definition);
-    const result = await runJob(vscode, job);
+    const submission = scheduler.submit(job);
 
-    if (result.status === "failed") {
-      const exitText = result.exitCode === undefined ? "不明" : String(result.exitCode);
-      await vscode.window.showErrorMessage(`JobのStep ${result.failedStep + 1}/${job.steps.length} が失敗しました（exit code ${exitText}）。`);
+    if (submission.state.status === "Waiting") {
+      await vscode.window.showInformationMessage("空き実行slotがないため、JobをQueueへ追加しました。");
     }
-    return Object.freeze({ job, result });
+
+    submission.completion.then(async (state) => {
+      if (state.status !== "Failed") {
+        return;
+      }
+      if (state.failedStep !== undefined) {
+        const exitText = state.exitCode === undefined ? "不明" : String(state.exitCode);
+        await vscode.window.showErrorMessage(`JobのStep ${state.failedStep}/${job.steps.length} が失敗しました（exit code ${exitText}）。`);
+      } else {
+        await vscode.window.showErrorMessage(`Jobを実行できませんでした: ${state.error?.message ?? "原因不明のエラー"}`);
+      }
+    });
+    return Object.freeze({ job, submission });
   } catch (error) {
     await vscode.window.showErrorMessage(formatError(error));
     return undefined;
   }
 }
 
-function registerSubmitCommand(vscode) {
-  return vscode.commands.registerCommand("commandWorkbench.submit", () => submitArgsList(vscode));
+function registerSubmitCommand(vscode, scheduler) {
+  return vscode.commands.registerCommand("commandWorkbench.submit", () => submitArgsList(vscode, scheduler));
 }
 
 module.exports = { getDefaultCwd, registerSubmitCommand, submitArgsList };

@@ -8,9 +8,10 @@
 - `@exec` / `@cwd`、whitespace・double quote・行頭commentを扱うparser
 - `commandWorkbench.commands` の実行profile検証。executable shorthandと固定 `args` を持つprofileに対応
 - `Ctrl+Enter` による未保存bufferのJob化と、Task API `ProcessExecution` を使った複数Stepの逐次実行
-- tokenizer、parser、profile検証のunit test
+- FIFO Job Queueと `commandWorkbench.maxParallelJobs` によるJob単位の並列実行
+- tokenizer、parser、profile検証、Job snapshot、Queue、実行制御のunit test
 
-FIFO Queue、並列Scheduler、Editor補完、D&D、Queue UIは未実装です。
+Editor補完、D&D、Queue UIは未実装です。
 
 ## 形式の例
 
@@ -40,6 +41,8 @@ FIFO Queue、並列Scheduler、Editor補完、D&D、Queue UIは未実装です�
 ```
 
 profileの固定 `args` は `.argslist` のargumentより先に渡す設計です。
+
+`commandWorkbench.maxParallelJobs` は既定値1です。値を増やすと空いたslot分のWaiting Jobを開始し、値を減らしても実行中Jobは停止しません。
 
 ## 開発
 

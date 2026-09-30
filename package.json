@@ -92,6 +92,12 @@
           "type": "string",
           "default": "",
           "description": "Untitled documentでworkspace folderがない場合に使うdefault cwdです。"
+        },
+        "commandWorkbench.maxParallelJobs": {
+          "type": "integer",
+          "default": 1,
+          "minimum": 1,
+          "description": "同時に実行するJobの最大数です。実行中のJobは変更時に停止しません。"
         }
       }
     }

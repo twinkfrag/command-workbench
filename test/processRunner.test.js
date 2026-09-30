@@ -57,10 +57,12 @@ test("ProcessExecutionへexecutable、argv、cwdを渡し、Stepを逐次実行�
       { executablePath: "C:\\tools\\ffprobe.exe", argv: ["output.mkv"], cwd: "C:\\work" },
     ],
   };
+  const startedSteps = [];
 
-  const result = await runJob(vscode, job);
+  const result = await runJob(vscode, job, { onStepStart: (index) => startedSteps.push(index) });
 
   assert.deepEqual(result, { status: "completed" });
+  assert.deepEqual(startedSteps, [0, 1]);
   assert.equal(vscode.captureTasks.length, 2);
   assert.equal(vscode.captureTasks[0].execution instanceof vscode.ProcessExecution, true);
   assert.equal(vscode.captureTasks[0].execution.process, "C:\\tools\\ffmpeg.exe");

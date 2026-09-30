@@ -5,3 +5,4 @@ require("./executableResolver.test");
 require("./job.test");
 require("./processRunner.test");
 require("./submitCommand.test");
+require("./scheduler.test");
