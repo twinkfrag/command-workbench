@@ -10,7 +10,7 @@
 | `src/language/` | 引数のトークン化・解析 |
 | `src/commands/` | プロファイル検証、実行ファイル解決、Job の投入 |
 | `src/queue/` | Job のスナップショットと FIFO スケジューラー |
-| `src/execution/` | Task API の `ProcessExecution` による実行 |
+| `src/execution/` | Job ごとの親プロセス、子の逐次実行、キューへの進捗・結果通知 |
 | `src/editor/` | ファイルドロップ・補完 |
 | `src/view/` | キュー表示と Job 操作 |
 | `syntaxes/` | TextMate の色分け定義 |
@@ -18,13 +18,21 @@
 
 JavaScript を直接読み込むため、トランスパイルやバンドルは不要です。拡張機能の実行時依存パッケージはありません。
 
+実行は1 Job に1つの `ProcessExecution` タスクを作ります。Windows では標準の Windows PowerShell 5.1 と .NET の `ProcessStartInfo`、それ以外では VS Code 同梱の Node.js ランタイムと `spawn()` を使います。Windows PowerShell は `-NoProfile -ExecutionPolicy Bypass -File` で配布した実行ホストを起動します。組織のポリシーでスクリプト実行を禁止している環境では起動できない場合があります。対象コマンドはシェル構文として評価せず、実行ファイルと引数を直接渡します。Windows の引数は空文字・引用符・末尾のバックスラッシュを保持するよう Windows の argv 規則で引用します。
+
+親は終了結果をローカル IPC でキューへ通知してから Enter を待ちます。Task 自体の終了を Job の完了として扱うとキューが止まるため、この2つの寿命を分けています。IPC は Windows の名前付きパイプ、他 OS の専用一時ディレクトリ内の Unix ソケットを使い、完了・失敗・取消で解放します。実行中の Terminate は Task API で親と子を停止します。
+
+子の終了コードは IPC で通知し、Enter 入力後の親は終了コード0で終了します。子の失敗結果はキューに保持したまま、VS Code による追加のタスクエラー表示やキー入力待ちを避け、`presentationOptions.close` でターミナルを閉じます。
+
+タスク開始の PID から対応するターミナルを識別し、ステップ開始・終了時に `sendText("", false)` を呼びます。文字や Enter は送らず、VS Code の子プロセス検出の更新を促します。公開 API で検出フラグを直接変更せず、子の終了後も親を生かして検出できる状態を保ちます。最小対応版と各 OS で終了確認も実機確認してください。
+
 ## テスト
 
 ```powershell
 node test/run.js
 ```
 
-`npm test` でも同じテストを実行できます。テスト用の外部パッケージのインストールは不要です。VS Code API を使う部分はモックで検証しているため、エディターやターミナルの動作は実機でも確認します。
+`npm test` でも同じテストを実行できます。テスト用の外部パッケージのインストールは不要です。実行ホストのテストでは実際の子プロセスを起動し、引数・作業ディレクトリ・環境・結果通知・入力待ちを検証します。VS Code API はモックのため、エディターやターミナルの動作は実機でも確認します。
 
 ## Extension Development Host
 
@@ -58,6 +66,8 @@ code --new-window --extensionDevelopmentPath="$PWD" .
 - ファイルドロップ、選択範囲内へのドロップ、プロファイル・パス補完、コメント内の補完抑止、色分け、キュー表示を確認する。
 - ワークスペースのない新規ファイルで、絶対 `@cwd` があれば実行でき、作業ディレクトリを決定できなければエラーになる。
 - ffmpeg / ffprobe、および固定引数を持つプロファイルを使う変更では、それらの実行経路も確認する。
+- `terminal.integrated.confirmOnExit: "hasChildProcesses"` で長時間のジョブ実行中にウィンドウを閉じ、終了確認と取消を確認する。正常終了後は完了・Enter の案内とキューの Completed を確認し、子プロセス検出の更新後にウィンドウを確認なしで閉じられることを確認する。
+- 完了ターミナルを残して次の Job が開始すること、失敗時も結果表示と Enter 待ちになること、文字キーでは閉じず Enter で閉じること、Terminate で子や孫のプロセスが残らないことを確認する。
 
 ## VSIX のビルド
 
