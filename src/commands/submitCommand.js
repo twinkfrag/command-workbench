@@ -20,7 +20,7 @@ function getDefaultCwd(vscode, document) {
     return path.resolve(configuredDefault);
   }
 
-  throw new Error("Untitled document のcwdを決定できません。workspace folderかdefault cwdを設定してください。");
+  return undefined;
 }
 
 function formatError(error) {

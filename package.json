@@ -4,6 +4,10 @@
   "description": "CLI引数列を編集し、Jobとして実行キューへ投入するVS Code拡張です。",
   "version": "0.1.0",
   "publisher": "command-workbench",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/twinkfrag/command-workbench.git"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },

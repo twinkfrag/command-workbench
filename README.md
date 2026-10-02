@@ -1,19 +1,25 @@
 # Command Workbench
 
-`.argslist` の引数列をVS Codeの通常のテキストエディターで編集し、現在のbufferをimmutableなJobとして実行する拡張機能です。通常部分は改行を含むwhitespace区切りのargv列として扱い、shell scriptとしては解釈しません。
+CLI の引数列を `.argslist` ファイルとして編集し、VS Code から実行する拡張機能です。通常のテキストエディターで書いた内容を、未保存のまま `Ctrl+Enter` で実行キューへ投入できます。
 
-## 現在の実装
+引数はシェルを介さず実行ファイルへ渡します。ffmpeg / ffprobe などの長い引数列を複数行に分けて編集したり、複数のコマンドを順に実行したりできます。実行する CLI は別途インストールしてください。
 
-- `.argslist` のlanguage registrationと行コメント設定
-- `@exec` / `@cwd`、whitespace・double quote・行頭commentを扱うparser
-- `commandWorkbench.commands` の実行profile検証。executable shorthandと固定 `args` を持つprofileに対応
-- `Ctrl+Enter` による未保存bufferのJob化と、Task API `ProcessExecution` を使った複数Stepの逐次実行
-- FIFO Job Queueと `commandWorkbench.maxParallelJobs` によるJob単位の並列実行
-- `DocumentDropEditProvider` によるfile path挿入、Command Profile / path completion、comment・directive・quoted stringのsyntax highlighting
-- Queue Tree Viewでの状態表示、Waiting JobのCancel、Running JobのTerminate、Rerun、Job snapshot表示
-- tokenizer、parser、profile検証、Job snapshot、Queue、実行制御、Editor provider、Queue UIのunit test
+## インストール
 
-ファイルD&DにはVS Code設定 `editor.dropIntoEditor.enabled` が必要です。OSからEditorへdropする場合はShiftを押しながら操作する必要があることがあります。D&DはCommand optionを追加せず、quoted full pathだけを挿入します。
+Desktop 版 VS Code 1.90.0 以降と、ローカルの実行ファイル・ファイルシステムを対象にしています。
+
+VSIX ファイルを拡張機能ビューの「VSIX からのインストール」で選択するか、次のコマンドでインストールします。VSIX の作成方法は [開発ガイド](docs/development.md) を参照してください。
+
+```powershell
+code --install-extension ./command-workbench-0.1.0.vsix
+```
+
+## 使い方
+
+1. VS Code の `settings.json` に実行したいコマンドのプロファイルを登録します（下記参照）。
+2. `.argslist` を作成し、`@exec` にプロファイル名、その後に引数を書きます。
+3. `Ctrl+Enter`、またはコマンドパレットの `Command Workbench: Submit Argslist Job` で実行します。
+4. エクスプローラーの `Command Queue` で状態を確認します。標準出力・標準エラーは統合ターミナルに表示されます。
 
 ## 形式の例
 
@@ -26,7 +32,7 @@
 "output.mkv"
 ```
 
-`@exec` はCommand Profileのaliasを指定します。空白や改行は通常argumentの区切りです。`@exec` だけがStep境界になります。
+`@exec` は登録済みプロファイル名を指定します。次の `@exec` を書くと新しいステップになり、前のステップが成功した後に実行します。
 
 ## Command Profile設定例
 
@@ -42,20 +48,55 @@
 }
 ```
 
-profileの固定 `args` は `.argslist` のargumentより先に渡す設計です。
+`executable` は実行ファイル名またはパスで指定します。`python.exe script.py` のようなコマンドライン文字列にはせず、固定引数を `args` 配列に分けてください。固定引数はファイルに書いた引数より先に渡します。
 
-`commandWorkbench.maxParallelJobs` は既定値1です。値を増やすと空いたslot分のWaiting Jobを開始し、値を減らしても実行中Jobは停止しません。
+## ファイル形式
+
+- 空白・タブ・改行で引数を区切ります。改行はコマンドの終了を意味しません。
+- 空白を含む引数は二重引用符で囲みます。`""` は空文字の引数です。引用符内の改行も保持します。
+- バックスラッシュはエスケープとして扱いません。Windows のパスをそのまま書けます。二重引用符そのものを引数に含めるためのエスケープ構文はありません。
+- 行頭の `#` はコメントです。先頭に空白を置けます。行の途中の `#` は通常の引数の一部になります。
+- `@exec <プロファイル名>` は新しい実行ステップを開始します。引数は次の `@exec` まで同じステップに属します。
+- `@cwd <パス>` は後続の `@exec` の作業ディレクトリを設定します。相対パスはその時点の作業ディレクトリから解決します。既存のステップには適用しません。
+- ディレクティブは行頭（先頭空白可）に単独で記述します。対応するディレクティブは `@exec` と `@cwd` だけです。
+
+`@exec` より前の引数、未登録プロファイル、未知のディレクティブ、閉じていない引用符はエラーになります。パイプ、リダイレクト、環境変数、コマンド置換などのシェル構文は展開しません。これらの文字列も引数として渡します。
+
+作業ディレクトリの初期値は、保存先のあるファイルではその親ディレクトリです。未保存の新規ファイルではワークスペースフォルダー、`commandWorkbench.defaultCwd` の順に使います。いずれもない場合は、最初の `@exec` より前に絶対パスの `@cwd` が必要です。
+
+## 実行キュー
+
+投入時のテキスト・プロファイル・引数・作業ディレクトリを Job のスナップショットとして保持します。実行ファイルは解決できる範囲で実体のパスに固定し、解決できない実行ファイル名には投入時の PATH を保持します。投入後の編集や設定変更は既存の Job に反映されません。実行ファイルや入力ファイルの内容自体はコピーしません。
+
+Job は投入順に開始し、Job 内のステップは順に実行します。ステップが失敗するとその Job の後続ステップを停止し、キュー内の別の Job は継続します。
+
+`Command Queue` の各 Job を右クリックすると、次の操作ができます。Job をクリックしてスナップショットを開くこともできます。
+
+| 操作 | 動作 |
+| --- | --- |
+| Cancel Waiting Job | 待機中の Job を取り消す |
+| Terminate Running Job | 実行中のプロセスを停止し、Job を取り消す |
+| Rerun Job | 元のスナップショットから新しい Job を投入する |
+| Show Job Snapshot | 投入時の情報を読み取り専用の JSON で表示する |
+
+キューとスナップショットはメモリー上に保持され、VS Code のウィンドウ再読み込み後には復元されません。
+
+## 設定
+
+| 設定 | 既定値 | 説明 |
+| --- | --- | --- |
+| `commandWorkbench.commands` | `{}` | プロファイル名と実行ファイル、任意の固定引数の対応 |
+| `commandWorkbench.defaultCwd` | `""` | ワークスペースのない新規ファイルの作業ディレクトリ。絶対パスを推奨 |
+| `commandWorkbench.maxParallelJobs` | `1` | 同時実行する Job の最大数（1 以上の整数） |
+
+並列数を増やすと空いた枠で待機中の Job を開始します。減らしても実行中の Job は停止せず、空きができるまで新しい Job の開始を待ちます。
+
+## 編集支援
+
+ファイルをドロップすると、二重引用符で囲んだフルパスを挿入します。オプションは追加しません。選択範囲内へドロップした場合はその範囲を置換します。`editor.dropIntoEditor.enabled` を有効にしてください。OS からのドロップでは Shift キーを押しながら操作する必要がある場合があります。
+
+`@exec` の後では登録済みプロファイル名を補完します。パス補完は `./`、`../`、`D:\` などの区切り文字を含む入力から使え、相対パスはその位置の作業ディレクトリを基準にします。コメント内では補完しません。コメント・ディレクティブ・プロファイル名・引用符付き文字列を色分けします。
 
 ## 開発
 
-Node.jsの組み込みtest runnerを使います。外部packageのインストールは不要です。
-
-```powershell
-node test/run.js
-```
-
-VS Code Extension Development Hostで開く場合は、product directoryで次を実行します。
-
-```powershell
-code --extensionDevelopmentPath="$PWD"
-```
+ソース構成、テスト、Extension Development Host、VSIX のビルド・ローカルインストールは [開発ガイド](docs/development.md) を参照してください。

@@ -74,7 +74,7 @@ test("active editorの未保存textを使い、保存操作を呼ばずにJob化
   assert.equal((await result.submission.completion).status, "Completed");
 });
 
-test("Untitled documentはdefaultCwdへfallbackし、未設定ならerrorにする", () => {
+test("Untitled documentはdefaultCwdへfallbackし、未設定ならparserでcwdを判断する", () => {
   const vscode = {
     workspace: {
       getWorkspaceFolder: () => undefined,
@@ -85,5 +85,40 @@ test("Untitled documentはdefaultCwdへfallbackし、未設定ならerrorにす�
   assert.equal(getDefaultCwd(vscode, { uri: { scheme: "untitled" } }), path.resolve("D:\\fallback"));
 
   vscode.workspace.getConfiguration = () => ({ get: () => "" });
-  assert.throws(() => getDefaultCwd(vscode, { uri: { scheme: "untitled" } }), /cwd/);
+  assert.equal(getDefaultCwd(vscode, { uri: { scheme: "untitled" } }), undefined);
+});
+
+test("workspaceもdefaultCwdもないUntitled documentを絶対@cwdで実行できる", async () => {
+  const cwd = process.cwd();
+  let sourceText = `@cwd "${cwd}"\n@exec node\n--version`;
+  const errors = [];
+  const vscode = {
+    window: {
+      activeTextEditor: {
+        document: {
+          languageId: "argslist",
+          uri: { scheme: "untitled" },
+          getText: () => sourceText,
+        },
+      },
+      showErrorMessage: (message) => errors.push(message),
+    },
+    workspace: {
+      getWorkspaceFolder: () => undefined,
+      getConfiguration: () => ({ get: (name, fallback) => name === "commands" ? { node: process.execPath } : fallback }),
+    },
+  };
+  const scheduler = new JobScheduler({ executeJob: async () => ({ status: "completed" }) });
+
+  const result = await submitArgsList(vscode, scheduler);
+  assert.equal(result.job.steps[0].cwd, cwd);
+  assert.equal((await result.submission.completion).status, "Completed");
+  assert.deepEqual(errors, []);
+
+  sourceText = "@exec node\n--version";
+  assert.equal(await submitArgsList(vscode, scheduler), undefined);
+  sourceText = "@cwd relative\n@exec node\n--version";
+  assert.equal(await submitArgsList(vscode, scheduler), undefined);
+  assert.equal(errors.length, 2);
+  assert.equal(scheduler.getStates().length, 1);
 });
