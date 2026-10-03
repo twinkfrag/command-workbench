@@ -14,7 +14,10 @@ function makeTask(vscode, job, endpoint) {
     ? ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(__dirname, "jobHost.ps1"), endpoint]
     : [path.join(__dirname, "jobHost.js"), endpoint];
   const execution = new vscode.ProcessExecution(executable, args, {
-    cwd: job.steps[0].cwd,
+    // VS Code only permits a terminal's initial cwd to be the user home in
+    // an empty window. Each child still starts in its snapshotted Step cwd.
+    cwd: vscode.workspace.workspaceFolders?.length || vscode.workspace.workspaceFile
+      ? job.steps[0].cwd : os.homedir(),
     ...(!windows ? { env: { ELECTRON_RUN_AS_NODE: "1" } } : {}),
   });
   const task = new vscode.Task(

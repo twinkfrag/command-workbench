@@ -50,6 +50,28 @@ code --install-extension ./command-workbench-0.1.0.vsix
 
 `executable` は実行ファイル名またはパスで指定します。`python.exe script.py` のようなコマンドライン文字列にはせず、固定引数を `args` 配列に分けてください。固定引数はファイルに書いた引数より先に渡します。
 
+### PowerShell スクリプト
+
+`.ps1` を実行するときは PowerShell の `-File` にスクリプトのパスを渡します。
+
+```json
+{
+  "commandWorkbench.commands": {
+    "notify": {
+      "executable": "pwsh.exe",
+      "args": ["-ExecutionPolicy", "RemoteSigned", "-File", "C:\\tools\\Send-Notify.ps1"]
+    }
+  }
+}
+```
+
+```text
+@exec notify
+"encode complete"
+```
+
+この例ではスクリプトに `encode complete` が1つの引数として届きます。`-Command` は後続の引数も PowerShell のコードとして再解析するため、この用途には使いません。プロファイルで明示したシェルのオプションは拡張機能から書き換えません。実行ポリシーは環境に合わせて設定してください。詳細は [PowerShell の起動オプション](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_pwsh) を参照してください。
+
 ## ファイル形式
 
 - 空白・タブ・改行で引数を区切ります。改行はコマンドの終了を意味しません。

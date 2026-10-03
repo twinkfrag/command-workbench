@@ -1,10 +1,13 @@
 const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
 const path = require("node:path");
+const os = require("node:os");
 const test = require("node:test");
 const { runJob } = require("../src/execution/processRunner");
+const { parseArgsList } = require("../src/language/parser");
+const { createJobSnapshot } = require("../src/queue/job");
 
-function fakeVscode({ helper, execute } = {}) {
+function fakeVscode({ helper, execute, workspaceFolders = [{}], workspaceFile } = {}) {
   const processListeners = new Set();
   const taskListeners = new Set();
   const startListeners = new Set();
@@ -26,6 +29,7 @@ function fakeVscode({ helper, execute } = {}) {
     for (const listener of [...taskListeners]) listener({ execution });
   };
   const vscode = {
+    workspace: { workspaceFolders, workspaceFile },
     TaskScope: { Workspace: 2 }, TaskRevealKind: { Always: 1 }, TaskPanelKind: { Dedicated: 2 },
     ProcessExecution, Task, capturedTasks: tasks, executions,
     listenerCount: () => processListeners.size + taskListeners.size + startListeners.size,
@@ -79,6 +83,32 @@ function fakeVscode({ helper, execute } = {}) {
   };
   return vscode;
 }
+
+test("フォルダーなしでは親をhomeから起動し、子には各Stepのcwdを渡す", { timeout: 15000 }, async (t) => {
+  const vscode = fakeVscode({ workspaceFolders: [] });
+  t.after(() => vscode.dispose());
+  const secondCwd = os.tmpdir();
+  const result = await runJob(vscode, job([
+    nodeStep("console.log('CWD1:'+process.cwd())"),
+    { ...nodeStep("console.log('CWD2:'+process.cwd())"), cwd: secondCwd },
+  ]));
+  assert.deepEqual(result, { status: "completed" });
+  const execution = vscode.executions[0];
+  assert.equal(execution.task.execution.options.cwd, os.homedir());
+  await waitForOutput(execution, /Enter キー/);
+  assert.equal(execution.output.match(/^CWD1:(.+)$/m)[1].trim(), __dirname);
+  assert.equal(execution.output.match(/^CWD2:(.+)$/m)[1].trim(), secondCwd);
+  execution.child.stdin.write("\n");
+  assert.equal(await execution.closed, 0);
+});
+
+test("フォルダーのあるworkspaceや空のworkspace fileでは親も最初のStepのcwdを使う", () => {
+  const { makeTask } = require("../src/execution/processRunner");
+  for (const workspace of [{}, { workspaceFolders: [], workspaceFile: {} }]) {
+    const vscode = fakeVscode(workspace);
+    assert.equal(makeTask(vscode, job([nodeStep("")]), "unused-endpoint").execution.options.cwd, __dirname);
+  }
+});
 
 const nodeStep = (script, argv = [], env) => ({
   executablePath: process.execPath, argv: ["-e", script, ...argv], cwd: __dirname, ...(env ? { env } : {}),
@@ -142,6 +172,29 @@ for (const helper of process.platform === "win32" ? ["platform", "node"] : ["pla
     execution.child.stdin.write("\n");
     assert.equal(await execution.closed, 0);
   });
+
+  test(`${helper}: PowerShell -Fileのスクリプトへquoted引数を1つずつ渡す`,
+    { timeout: 15000, skip: process.platform !== "win32" }, async (t) => {
+      const vscode = fakeVscode({ helper, workspaceFolders: [] });
+      t.after(() => vscode.dispose());
+      const source = `@cwd "${__dirname}"\n@exec script\n"encode complete" "$(throw 'expanded'); $HOME | text"`;
+      const definition = parseArgsList(source, { commands: {
+        script: {
+          executable: path.join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe"),
+          args: ["-NoProfile", "-ExecutionPolicy", "RemoteSigned", "-File", path.join(__dirname, "fixtures/receive message.ps1")],
+        },
+      } });
+      const result = await runJob(vscode, createJobSnapshot(source, definition));
+      assert.deepEqual(result, { status: "completed" });
+      const execution = vscode.executions[0];
+      await waitForOutput(execution, /Enter キー/);
+      const received = JSON.parse(execution.output.match(/^RECEIVED:(.+)$/m)[1]);
+      assert.deepEqual(received, {
+        message: "encode complete", literal: "$(throw 'expanded'); $HOME | text", cwd: __dirname,
+      });
+      execution.child.stdin.write("\n");
+      assert.equal(await execution.closed, 0);
+    });
 }
 
 test("起動失敗は終了コード不明で停止し、後続Stepを実行しない", { timeout: 15000 }, async (t) => {
